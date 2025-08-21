@@ -21,9 +21,9 @@ Chrono는 잦은 시간 조회가 필요하지만 반복적인 시스템 콜로 
 ├── requirements.txt      # 프로젝트 의존성 파일
 ├── src                   # 소스 코드 디렉토리
 │   ├── __init__.py
-│   └── chrono.py     # Chrono 모듈 구현체
+│   └── chrono.py         # Chrono 모듈 구현체
 └── tests                 # 테스트 스위트
-    └── test_chrono.py  # Chrono 모듈을 위한 단위/통합 테스트
+    └── test_chrono.py    # Chrono 모듈을 위한 단위/통합 테스트
 ```
 
 ## 설치 방법

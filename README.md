@@ -21,9 +21,9 @@ Chrono is a high-performance, thread-safe time utility designed for applications
 ├── requirements.txt      # Project dependencies
 ├── src                   # Source code directory
 │   ├── __init__.py
-│   └── chrono.py     # The Chrono module implementation
+│   └── chrono.py         # The Chrono module implementation
 └── tests                 # Test suite
-    └── test_chrono.py  # Unit and integration tests for Chrono
+    └── test_chrono.py    # Unit and integration tests for Chrono
 ```
 
 ## Installation
