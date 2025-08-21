@@ -14,8 +14,8 @@ combining the best features of various implementations:
 --- Quick Start Guide ---
 
 1. Basic Usage (Automatic Initialization)
-   Simply import the pre-initialized 'chrono' instance. It automatically onfigures
-   itself to your system's timezone on the first import (requires 'tzlocal' library).
+   Simply import the pre-initialized 'chrono' instance. It automatically configures
+   itself to your system's timezone on the first import.
 
    from src.chrono import chrono, now, timestamp
 
@@ -23,27 +23,24 @@ combining the best features of various implementations:
    current_datetime = chrono.now() # or simply now()
    print(f"Current System Time: {current_datetime}")
 
-   # Get the current time as a Unix timestamp (float)
-   current_ts = chrono.timestamp() # or simply timestamp()
-   print(f"Current Timestamp: {current_ts}")
+
+2. Custom Initialization (At Application Start)
+   For explicit control, create the instance with custom settings. This only
+   works the very first time Chrono is accessed in your application.
+
+   from src.chrono import Chrono
+
+   # This line should be run once when your application starts.
+   chrono = Chrono(timezone_str='Asia/Seoul', cache_interval_ms=50)
 
 
-2. Reconfiguration (Best Practice for Production)
-   For production servers, it is *highly recommended* to explicitly set the
-   timezone to avoid ambiguity. Call reconfigure() or initialize_chrono()
-   once when your application starts.
+3. Reconfiguration (Recommended Practice)
+   To change settings after initialization, always use reconfigure().
 
    from src.chrono import reconfigure_chrono, now
 
-   if __name__ == "__main__":
-       # Reconfigure once at startup for a specific timezone
-       reconfigure_chrono(
-           timezone_str='Asia/Seoul',
-           cache_interval_ms=50
-       )
-
-       # Now you can use the functions anywhere in your app
-       print(f"Seoul Time: {now()}")
+   reconfigure_chrono(timezone_str='America/New_York')
+   print(f"New York Time: {now()}")
 
 """
 
@@ -69,12 +66,12 @@ except ImportError:
 
 
 def _get_system_timezone() -> str:
-    """Detects the system's IANA timezone name using the 'tzlocal' library.
+    """
+    Detects the system's IANA timezone name using the 'tzlocal' library.
 
     This function attempts to find the local timezone to provide a sensible
     default for Chrono's initialization. If 'tzlocal' is not installed or
     fails to determine the timezone, it logs a warning and safely falls
-    back to "UTC".
 
     Returns:
         str: The IANA timezone name (e.g., 'America/New_York') or 'UTC'
@@ -123,8 +120,9 @@ class SingletonMeta(type):
         Handles the creation of a class instance.
 
         If an instance of the class does not already exist, it creates one
-        within a lock to ensure thread safety. Otherwise, it returns the
-        existing instance.
+        within a lock to ensure thread safety. The class's `__init__` method
+        will only be called this one time. Subsequent calls to the constructor
+        will return the existing instance without re-initializing it.
 
         Args:
             *args: Variable length argument list for the class constructor.
@@ -150,94 +148,119 @@ class Chrono(metaclass=SingletonMeta):
     with minimal overhead. It avoids frequent system calls by caching the time
     and calculating the precise current time using `time.monotonic()`. It can
     operate with a background thread for proactive updates or in an on-demand
-    mode.
+    mode. This class is a singleton, meaning only one instance will ever exist.
     """
 
-    def __init__(self) -> None:
-        """
-        Initializes the Chrono singleton instance with default values.
-
-        This constructor is called only once due to the SingletonMeta metaclass.
-        It sets up the initial state, including default timezone, cache
-        settings, and thread management objects. It also registers the
-        shutdown method to be called on program exit.
-        """
-        # Prevent re-initialization if accessed directly after creation
-        if hasattr(self, "_initialized") and self._initialized:
-            return
-
-        # Core configuration
-        self._timezone_str: str = "UTC"
-        self._tz: ZoneInfo = ZoneInfo("UTC")
-        self._cache_interval_ms: int = 10
-        self._cache_interval_sec: float = 0.01
-        self._background_update: bool = True
-
-        # Cached time values
-        self._cached_datetime: datetime = datetime.fromtimestamp(0)
-        self._cached_timestamp: float = 0.0
-        self._last_monotonic_time: float = 0.0
-
-        # Threading and safety
-        self._lock: threading.RLock = threading.RLock()
-        self._update_thread: Optional[threading.Thread] = None
-        self._shutdown_event: threading.Event = threading.Event()
-
-        # Statistics and state
-        self._cache_hits: int = 0
-        self._cache_misses: int = 0
-        self._last_update_time: Optional[datetime] = None
-        self._initialized: bool = False
-
-        # Register cleanup hook
-        atexit.register(self.shutdown)
-
-    def initialize(
+    def __init__(
         self,
-        timezone_str: str = "UTC",
+        timezone_str: Optional[str] = None,
         cache_interval_ms: int = 10,
         background_update: bool = True,
-    ) -> "Chrono":
+    ) -> None:
         """
-        Configures or re-configures the Chrono instance.
+        Initializes the Chrono singleton instance.
 
-        This is the main method for setting up Chrono's behavior. It is
-        thread-safe and can be called at any time to change the configuration.
+        This constructor is guaranteed to run only once when the singleton is
+        first created. Any subsequent calls to `Chrono()` will return the
+        existing instance without re-running this method. To change settings
+        after creation, you must use the `reconfigure()` method.
 
         Args:
-            timezone_str (str): The IANA timezone name (e.g., 'Asia/Seoul', 'UTC').
+            timezone_str (Optional[str]): The IANA timezone name (e.g., 'Asia/Seoul').
+                If None, it defaults to the system's detected timezone or 'UTC'.
             cache_interval_ms (int): The interval in milliseconds at which the
-                internal time cache is updated. Clamped between 1 and 1000.
-            background_update (bool): If True, a background thread will
-                proactively update the cache. If False, the cache is updated
-                on-demand when it's considered stale.
+                internal time cache is updated. Defaults to 10ms.
+            background_update (bool): If True, a background thread proactively
+                updates the cache. If False, updates are done on-demand.
+                Defaults to True.
+        """
+        # This check prevents re-entry if the constructor is somehow accessed
+        # after the instance is fully created.
+        if hasattr(self, "_is_configured") and self._is_configured:
+            return
 
-        Returns:
-            Chrono: The configured instance of the class, allowing for chaining.
+        # Initialize thread-safety and state management attributes first
+        self._lock = threading.RLock()
+        self._shutdown_event = threading.Event()
+        self._update_thread: Optional[threading.Thread] = None
+        self._is_configured: bool = False
+
+        # Initialize all other attributes to default values
+        self._timezone_str: str = "UTC"
+        self._tz: ZoneInfo = ZoneInfo("UTC")
+        self._cache_interval_ms = 0
+        self._cache_interval_sec = 0.0
+        self._background_update = False
+        self._cached_datetime = datetime.fromtimestamp(0)
+        self._cached_timestamp = 0.0
+        self._last_monotonic_time = 0.0
+        self._last_update_time: Optional[datetime] = None
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+        # Determine the initial timezone, falling back to the system default
+        initial_tz = (
+            timezone_str if timezone_str is not None else _get_system_timezone()
+        )
+
+        # Use the central `reconfigure` method to set up the initial state
+        self.reconfigure(
+            timezone_str=initial_tz,
+            cache_interval_ms=cache_interval_ms,
+            background_update=background_update,
+        )
+
+        # Register the shutdown hook once to be called on program exit
+        atexit.register(self.shutdown)
+
+    def reconfigure(
+        self,
+        timezone_str: Optional[str] = None,
+        cache_interval_ms: Optional[int] = None,
+        background_update: Optional[bool] = None,
+    ) -> None:
+        """
+        Atomically configures or reconfigures the Chrono instance.
+
+        This is the central method for setting Chrono's behavior. It is
+        thread-safe and is the correct way to change settings after
+        initialization. If a parameter is not provided, its current value
+        is retained.
+
+        Args:
+            timezone_str (Optional[str]): The new IANA timezone name.
+            cache_interval_ms (Optional[int]): The new cache interval in milliseconds.
+            background_update (Optional[bool]): The new background update mode.
         """
         with self._lock:
+            # Always stop the background thread before changing settings
             self._stop_background_update()
 
-            self._setup_timezone(timezone_str)
-            self._cache_interval_ms = max(1, min(1000, cache_interval_ms))
-            self._cache_interval_sec = self._cache_interval_ms / 1000.0
-            self._background_update = background_update
+            if timezone_str is not None:
+                self._setup_timezone(timezone_str)
 
-            # Perform an immediate update to populate the cache
+            if cache_interval_ms is not None:
+                self._cache_interval_ms = max(1, min(1000, cache_interval_ms))
+                self._cache_interval_sec = self._cache_interval_ms / 1000.0
+
+            if background_update is not None:
+                self._background_update = background_update
+
+            # Perform an immediate cache update with the new settings
             self._update_cached_time()
 
+            # Restart the background thread if it is enabled
             if self._background_update:
                 self._start_background_update()
 
-            self._initialized = True
-            return self
+            self._is_configured = True
 
     def _setup_timezone(self, timezone_str: str) -> None:
         """
         Initializes the `zoneinfo.ZoneInfo` object from a timezone string.
 
         If the provided string is invalid, it logs an error and safely falls
-        back to using UTC.
+        back to using UTC to prevent application crashes.
 
         Args:
             timezone_str (str): The IANA timezone name to use.
@@ -257,12 +280,12 @@ class Chrono(metaclass=SingletonMeta):
         """
         Performs a system call to update the internal time cache.
 
-        This method is the only one that makes a system call to get the
-        current time. It fetches the current datetime, converts it to a
-        timestamp, and stores both along with the current monotonic time.
-        It also increments the cache miss counter for statistics.
+        This is the most performance-critical method, as it involves system
+        calls. It fetches the current datetime, converts it to a timestamp,
+        and stores both along with the current monotonic time. It also
+        increments the cache miss counter for statistics.
 
-        Note: This method should be called within a lock.
+        Note: This method must be called within a lock to ensure atomicity.
         """
         current_monotonic = time.monotonic()
         current_datetime = datetime.now(self._tz)
@@ -280,7 +303,7 @@ class Chrono(metaclass=SingletonMeta):
         If a thread is not already running, this method creates and starts a
         new daemon thread that will periodically call `_update_cached_time`.
 
-        Note: This method should be called within a lock.
+        Note: This method must be called within a lock.
         """
         if self._update_thread and self._update_thread.is_alive():
             return
@@ -297,9 +320,9 @@ class Chrono(metaclass=SingletonMeta):
         Signals the background update thread to stop and waits for it to exit.
 
         This is a graceful shutdown procedure that sets an event and then
-        joins the thread with a timeout.
+        joins the thread with a timeout to prevent hanging.
 
-        Note: This method should be called within a lock.
+        Note: This method must be called within a lock.
         """
         if self._update_thread and self._update_thread.is_alive():
             self._shutdown_event.set()
@@ -324,18 +347,18 @@ class Chrono(metaclass=SingletonMeta):
                     file=sys.stderr,
                 )
 
-    def _check_and_update_on_demand(self) -> None:
+    def _update_if_stale(self) -> None:
         """
-        Updates the cache if it's stale (for non-background mode).
+        Updates the cache if it's stale (for on-demand mode).
 
         This method checks if the time elapsed since the last cache update
         exceeds the configured interval. If it does, it acquires a lock and
-        updates the cache. This is used when `background_update` is False.
+        updates the cache. Used when `background_update` is False.
         """
         if time.monotonic() - self._last_monotonic_time > self._cache_interval_sec:
             with self._lock:
                 # Double-check inside the lock to prevent redundant updates from
-                # multiple threads waiting for the lock.
+                # multiple threads that were waiting for the lock.
                 if (
                     time.monotonic() - self._last_monotonic_time
                     > self._cache_interval_sec
@@ -344,35 +367,25 @@ class Chrono(metaclass=SingletonMeta):
 
     def now(self) -> datetime:
         """
-        Returns the current timezone-aware datetime object.
+        Returns the current timezone-aware datetime object with high performance.
 
         This is the primary method for getting the current time. It calculates
         the time by taking the last cached datetime and adding the elapsed
-        monotonic time, avoiding a system call. This provides high accuracy
-        with very low overhead.
+        monotonic time, which avoids a costly system call.
 
         Returns:
             datetime: The current timezone-aware datetime.
         """
-        if not self._initialized:
-            # Auto-initialize on first use with system timezone
-            self.initialize(_get_system_timezone())
-
         if not self._background_update:
-            self._check_and_update_on_demand()
+            self._update_if_stale()
 
-        # Reading these attributes is thread-safe in Python
-        last_mono_time = self._last_monotonic_time
-        cached_dt = self._cached_datetime
-
-        # Calculate precise time using monotonic clock delta
-        elapsed_seconds = time.monotonic() - last_mono_time
+        elapsed_seconds = time.monotonic() - self._last_monotonic_time
         self._cache_hits += 1
-        return cached_dt + timedelta(seconds=elapsed_seconds)
+        return self._cached_datetime + timedelta(seconds=elapsed_seconds)
 
     def timestamp(self) -> float:
         """
-        Returns the current Unix timestamp as a float.
+        Returns the current Unix timestamp as a float with high performance.
 
         Similar to `now()`, this method calculates the current timestamp by
         taking the last cached timestamp and adding the elapsed monotonic
@@ -381,21 +394,12 @@ class Chrono(metaclass=SingletonMeta):
         Returns:
             float: The current Unix timestamp (e.g., 1678886400.123456).
         """
-        if not self._initialized:
-            # Auto-initialize on first use with system timezone
-            self.initialize(_get_system_timezone())
-
         if not self._background_update:
-            self._check_and_update_on_demand()
+            self._update_if_stale()
 
-        # Reading these attributes is thread-safe in Python
-        last_mono_time = self._last_monotonic_time
-        cached_ts = self._cached_timestamp
-
-        # Calculate precise timestamp using monotonic clock delta
-        elapsed_seconds = time.monotonic() - last_mono_time
+        elapsed_seconds = time.monotonic() - self._last_monotonic_time
         self._cache_hits += 1
-        return cached_ts + elapsed_seconds
+        return self._cached_timestamp + elapsed_seconds
 
     def strftime(self, format_string: str) -> str:
         """
@@ -412,44 +416,12 @@ class Chrono(metaclass=SingletonMeta):
         """
         return self.now().strftime(format_string)
 
-    def reconfigure(
-        self,
-        timezone_str: Optional[str] = None,
-        cache_interval_ms: Optional[int] = None,
-        background_update: Optional[bool] = None,
-    ) -> None:
-        """
-        Atomically reconfigures the Chrono instance at runtime.
-
-        This method allows changing any of the core configuration parameters
-        safely. If a parameter is not provided, its current value is retained.
-
-        Args:
-            timezone_str (Optional[str]): The new IANA timezone name.
-            cache_interval_ms (Optional[int]): The new cache update interval.
-            background_update (Optional[bool]): The new background update mode.
-        """
-        with self._lock:
-            # Use existing values as defaults if new ones aren't provided
-            new_tz = timezone_str if timezone_str is not None else self._timezone_str
-            new_interval = (
-                cache_interval_ms
-                if cache_interval_ms is not None
-                else self._cache_interval_ms
-            )
-            new_bg_update = (
-                background_update
-                if background_update is not None
-                else self._background_update
-            )
-            self.initialize(new_tz, new_interval, new_bg_update)
-
     def get_stats(self) -> Dict[str, Any]:
         """
         Retrieves performance and configuration statistics.
 
-        This method provides a snapshot of the current state and performance
-        metrics of the Chrono instance in a thread-safe manner.
+        This method provides a thread-safe snapshot of the current state and
+        performance metrics of the Chrono instance, useful for monitoring.
 
         Returns:
             Dict[str, Any]: A dictionary containing statistics such as
@@ -462,7 +434,7 @@ class Chrono(metaclass=SingletonMeta):
                 "timezone": self._timezone_str,
                 "cache_interval_ms": self._cache_interval_ms,
                 "background_update_enabled": self._background_update,
-                "is_initialized": self._initialized,
+                "is_configured": self._is_configured,
                 "cache_hits": self._cache_hits,
                 "cache_misses": self._cache_misses,
                 "cache_hit_ratio": f"{hit_ratio:.2f}%",
@@ -487,21 +459,13 @@ class Chrono(metaclass=SingletonMeta):
             self._cache_hits = 0
             self._cache_misses = 0
 
-    def is_initialized(self) -> bool:
-        """
-        Checks if the Chrono instance has been explicitly initialized.
-
-        Returns:
-            bool: True if `initialize()` has been called, False otherwise.
-        """
-        return self._initialized
-
     def shutdown(self) -> None:
         """
         Gracefully shuts down the Chrono instance.
 
         This method stops the background update thread. It is automatically
-        registered with `atexit` to be called on program termination.
+        registered with `atexit` to be called on program termination, so manual
+        calling is generally not necessary.
         """
         with self._lock:
             self._stop_background_update()
@@ -514,36 +478,12 @@ def get_chrono() -> Chrono:
     """
     Returns the global singleton instance of the Chrono class.
 
+    This function is the entry point for accessing the Chrono object.
+
     Returns:
         Chrono: The singleton Chrono object.
     """
     return Chrono()
-
-
-def initialize_chrono(
-    timezone_str: Optional[str] = None,
-    cache_interval_ms: int = 10,
-    background_update: bool = True,
-) -> Chrono:
-    """
-    A convenience function to initialize the global Chrono instance.
-
-    If no timezone is provided, it attempts to detect the system timezone.
-
-    Args:
-        timezone_str (Optional[str]): IANA timezone name. Defaults to system TZ.
-        cache_interval_ms (int): Cache update interval in milliseconds.
-        background_update (bool): Enable or disable the background thread.
-
-    Returns:
-        Chrono: The configured singleton instance.
-    """
-    tz = timezone_str if timezone_str is not None else _get_system_timezone()
-    return get_chrono().initialize(
-        timezone_str=tz,
-        cache_interval_ms=cache_interval_ms,
-        background_update=background_update,
-    )
 
 
 def reconfigure_chrono(
@@ -553,6 +493,8 @@ def reconfigure_chrono(
 ) -> None:
     """
     A convenience function to reconfigure the global Chrono instance.
+
+    This is a wrapper around `chrono.reconfigure()`.
 
     Args:
         timezone_str (Optional[str]): The new IANA timezone name.
@@ -568,7 +510,7 @@ def reconfigure_chrono(
 
 def now() -> datetime:
     """
-    A convenience function to get the current datetime from the global Chrono instance.
+    A convenience function to get the current datetime from the global instance.
 
     Returns:
         datetime: The current timezone-aware datetime.
@@ -578,7 +520,7 @@ def now() -> datetime:
 
 def timestamp() -> float:
     """
-    A convenience function to get the current timestamp from the global Chrono instance.
+    A convenience function to get the current timestamp from the global instance.
 
     Returns:
         float: The current Unix timestamp.
@@ -588,7 +530,7 @@ def timestamp() -> float:
 
 def strftime(format_string: str) -> str:
     """
-    A convenience function to format the current time using the global Chrono instance.
+    A convenience function to format the current time using the global instance.
 
     Args:
         format_string (str): The format string for the time.
@@ -620,11 +562,10 @@ def shutdown_chrono() -> None:
 
 
 # --- Pre-initialized instance for convenient access ---
-# This instance is created and initialized once when the module is first imported.
+# This creates and configures the singleton instance on first module import. It
+# uses the default parameters of the `Chrono` constructor, which means it will
+# auto-detect the system timezone.
 chrono = Chrono()
-if not chrono.is_initialized():
-    default_timezone = _get_system_timezone()
-    chrono.initialize(timezone_str=default_timezone)
 
 
 # --- Example Usage Demonstration ---
@@ -632,45 +573,37 @@ if __name__ == "__main__":
     """
     Running this module directly demonstrates various usage examples.
     """
+    print("=" * 60)
+    print(f"  Chrono Initial State (from default __init__)")
+    print("-" * 60)
+    print(f"  - Timezone: {get_chrono_stats()['timezone']}")
+    print(f"  - Current Time: {now().isoformat()}")
+    print("=" * 60)
 
-    # For demonstration, explicitly reconfigure for a server environment (e.g., 'Asia/Seoul').
-    # If this block is commented out, the examples will use the auto-detected system timezone.
+    # Reconfigure the existing instance for a different setting
+    print("\nReconfiguring for 'America/New_York' with 100ms interval...\n")
     reconfigure_chrono(
-        timezone_str="Asia/Seoul", cache_interval_ms=50, background_update=True
+        timezone_str="America/New_York", cache_interval_ms=100, background_update=True
     )
 
     print("=" * 60)
-    print(f"  Chrono Usage Showcase (Timezone: {get_chrono_stats()['timezone']})")
-    print("=" * 60)
+    print(f"  Chrono Reconfigured State")
+    print("-" * 60)
 
     # Basic Usage
     current_time = now()
     current_ts = timestamp()
     print(f"[Basic Usage]")
+    print(f"  - Timezone   : {get_chrono_stats()['timezone']}")
     print(f"  - now()      : {current_time}")
     print(f"  - isoformat(): {current_time.isoformat()}")
     print(f"  - timestamp(): {current_ts}")
     print("-" * 60)
 
     print(f"[strftime Formatting Examples]")
-    # Example 1: ISO 8601 format, suitable for log files.
-    log_format = strftime("%Y-%m-%dT%H:%M:%S%z")
-    print(f"  - Log Format : {log_format}")
-    # Example output: Log Format : 2025-08-21T12:00:00+0900
-
-    # Example 2: A more human-readable format.
-    readable_format = strftime("%B %d, %Y (%a) %I:%M:%S %p")
+    readable_format = strftime("%B %d, %Y (%a) %I:%M:%S %p %Z")
     print(f"  - Readable   : {readable_format}")
-    # Example output: Readable   : August 21, 2025 (Thu) 12:00:00 PM
-
-    # Example 3: For when only the date is needed.
-    date_only = strftime("%Y/%m/%d")
-    print(f"  - Date Only  : {date_only}")
-    # Example output: Date Only  : 2025/08/21
-
-    # Example 4: For when only the time and timezone info are needed.
-    time_with_timezone = strftime("%H:%M:%S %Z")
-    print(f"  - Time & Zone: {time_with_timezone}")
-    # Example output: Time & Zone: 12:00:00 KST
+    time_only = strftime("%H:%M:%S.%f")
+    print(f"  - Time Only  : {time_only}")
 
     print("=" * 60)
