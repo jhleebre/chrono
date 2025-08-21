@@ -17,7 +17,7 @@ combining the best features of various implementations:
    Simply import the pre-initialized 'chrono' instance. It automatically configures
    itself to your system's timezone on the first import (requires 'tzlocal' library).
 
-   from src.utils.chrono import chrono, now, timestamp
+   from src.chrono import chrono, now, timestamp
 
    # Get the current time as a datetime object
    current_datetime = chrono.now() # or simply now()
@@ -33,7 +33,7 @@ combining the best features of various implementations:
    timezone to avoid ambiguity. Call reconfigure() or initialize_chrono()
    once when your application starts.
 
-   from src.utils.chrono import reconfigure_chrono, now
+   from src.chrono import reconfigure_chrono, now
 
    if __name__ == "__main__":
        # Reconfigure once at startup for a specific timezone
@@ -50,7 +50,7 @@ combining the best features of various implementations:
 import os
 import sys
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import time
 import threading
@@ -58,9 +58,6 @@ import atexit
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional, Dict, Any, Type, List, Tuple
-from src.utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 # --- System Timezone Detection ---
 try:
@@ -83,19 +80,21 @@ def _get_system_timezone() -> str:
                 raise ValueError("tzlocal returned an empty timezone name.")
             return tz_name
         except Exception as e:
-            logger.warning(
-                "Chrono WARNING: Could not determine system timezone from 'tzlocal' (Error: %s). "
-                "Defaulting to 'UTC' timezone.",
+            print(
+                f"Chrono WARNING: Could not determine system timezone from 'tzlocal' (Error: %s). "
+                f"Defaulting to 'UTC' timezone.",
                 e,
+                file=sys.stderr,
             )
     else:
-        logger.warning(
-            "\n"
-            "======================================================================================\n"
-            "Chrono WARNING: 'tzlocal' library not found. Defaulting to 'UTC' timezone.\n"
-            "For automatic system timezone detection, please install it by running:\n"
-            "  pip install tzlocal\n"
-            "======================================================================================"
+        print(
+            f"\n"
+            f"======================================================================================\n"
+            f"Chrono WARNING: 'tzlocal' library not found. Defaulting to 'UTC' timezone.\n"
+            f"For automatic system timezone detection, please install it by running:\n"
+            f"  pip install tzlocal\n"
+            f"======================================================================================",
+            file=sys.stderr,
         )
     return "UTC"
 
@@ -155,12 +154,12 @@ class Chrono(metaclass=SingletonMeta):
             if self._background_update:
                 self._start_background_update()
             self._initialized = True
-            logger.info(
-                f"Chrono initialized - "
-                f"Timezone: {self._timezone_str}, "
-                f"Cache Interval: {self._cache_interval_ms}ms, "
-                f"Background Update: {self._background_update}"
-            )
+            # print(
+            #     f"Chrono initialized - "
+            #     f"Timezone: {self._timezone_str}, "
+            #     f"Cache Interval: {self._cache_interval_ms}ms, "
+            #     f"Background Update: {self._background_update}"
+            # )
             return self
 
     def _setup_timezone(self, timezone_str: str) -> None:
@@ -168,7 +167,10 @@ class Chrono(metaclass=SingletonMeta):
             self._tz = ZoneInfo(timezone_str)
             self._timezone_str = timezone_str
         except ZoneInfoNotFoundError:
-            logger.warning(f"Timezone '{timezone_str}' not found. Falling back to UTC.")
+            print(
+                f"Timezone '{timezone_str}' not found. Falling back to UTC.",
+                file=sys.stderr,
+            )
             self._tz = ZoneInfo("UTC")
             self._timezone_str = "UTC"
 
@@ -191,13 +193,13 @@ class Chrono(metaclass=SingletonMeta):
             name="ChronoUpdater",
         )
         self._update_thread.start()
-        logger.info("Chrono background update thread started.")
+        # print("Chrono background update thread started.")
 
     def _stop_background_update(self) -> None:
         if self._update_thread and self._update_thread.is_alive():
             self._shutdown_event.set()
             self._update_thread.join(timeout=1.0)
-            logger.info("Chrono background update thread stopped.")
+            # print("Chrono background update thread stopped.")
             self._update_thread = None
 
     def _background_update_worker(self) -> None:
@@ -206,7 +208,10 @@ class Chrono(metaclass=SingletonMeta):
                 with self._lock:
                     self._update_cached_time()
             except Exception as e:
-                logger.error(f"Error in Chrono background update: {e}", exc_info=True)
+                print(
+                    f"Error in Chrono background update: {e}",
+                    file=sys.stderr,
+                )
 
     def _check_and_update_on_demand(self) -> None:
         if time.monotonic() - self._last_monotonic_time > self._cache_interval_sec:
@@ -263,7 +268,7 @@ class Chrono(metaclass=SingletonMeta):
                 else self._background_update
             )
             self.initialize(new_tz, new_interval, new_bg_update)
-            logger.info("Chrono reconfigured.")
+            # print("Chrono reconfigured.")
 
     def get_stats(self) -> Dict[str, Any]:
         with self._lock:
@@ -291,7 +296,7 @@ class Chrono(metaclass=SingletonMeta):
         with self._lock:
             self._cache_hits = 0
             self._cache_misses = 0
-            logger.info("Chrono statistics have been reset.")
+            # print("Chrono statistics have been reset.")
 
     def is_initialized(self) -> bool:
         return self._initialized
@@ -299,7 +304,7 @@ class Chrono(metaclass=SingletonMeta):
     def shutdown(self) -> None:
         with self._lock:
             self._stop_background_update()
-            logger.info("Chrono has been shut down.")
+            # print("Chrono has been shut down.")
 
 
 # --- Convenience Functions for Easy Global Access ---

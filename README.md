@@ -21,12 +21,9 @@ Chrono is a high-performance, thread-safe time utility designed for applications
 ├── requirements.txt      # Project dependencies
 ├── src                   # Source code directory
 │   ├── __init__.py
-│   └── utils
-│       ├── chrono.py     # The Chrono module implementation
-│       └── logger.py     # A simple logger utility
+│   └── chrono.py     # The Chrono module implementation
 └── tests                 # Test suite
-    └── utils
-        └── test_chrono.py  # Unit and integration tests for Chrono
+    └── test_chrono.py  # Unit and integration tests for Chrono
 ```
 
 ## Installation
@@ -49,7 +46,7 @@ This module requires **Python 3.9+** (for the standard `zoneinfo` library).
 Chrono is designed for immediate use. Simply import the pre-initialized `chrono` instance.
 
 ```python
-from src.utils.chrono import chrono, now, timestamp
+from src.chrono import chrono, now, timestamp
 
 # The 'chrono' instance is automatically configured to your system's timezone.
 
@@ -72,7 +69,7 @@ print(f"Global now(): {now()}")
 For production environments, it's best practice to explicitly set the timezone to ensure consistent behavior.
 
 ```python
-from src.utils.chrono import reconfigure_chrono, now
+from src.chrono import reconfigure_chrono, now
 
 # Reconfigure at application startup
 reconfigure_chrono(
@@ -89,7 +86,7 @@ print(f"Server time (UTC): {now()}")
 You can retrieve performance and configuration statistics at any time.
 
 ```python
-from src.utils.chrono import get_chrono_stats
+from src.chrono import get_chrono_stats
 import json
 
 stats = get_chrono_stats()
@@ -110,9 +107,9 @@ print(json.dumps(stats, indent=2))
 
 ## Running Tests
 
-The module includes a comprehensive test suite to ensure its reliability and performance. To run the tests, use your preferred test runner, such as `pytest`.
+The module includes a comprehensive test suite to ensure its reliability and performance.
 
 ```bash
 # From the project root directory
-pytest
+python tests/test_chrono.py
 ```

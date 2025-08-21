@@ -14,9 +14,9 @@ from datetime import datetime
 from typing import List, Tuple
 from zoneinfo import ZoneInfo
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.utils.chrono import (
+from src.chrono import (
     Chrono,
     chrono,
     get_chrono,

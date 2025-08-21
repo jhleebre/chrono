@@ -21,12 +21,9 @@ Chrono는 잦은 시간 조회가 필요하지만 반복적인 시스템 콜로 
 ├── requirements.txt      # 프로젝트 의존성 파일
 ├── src                   # 소스 코드 디렉토리
 │   ├── __init__.py
-│   └── utils
-│       ├── chrono.py     # Chrono 모듈 구현체
-│       └── logger.py     # 간단한 로거 유틸리티
+│   └── chrono.py     # Chrono 모듈 구현체
 └── tests                 # 테스트 스위트
-    └── utils
-        └── test_chrono.py  # Chrono 모듈을 위한 단위/통합 테스트
+    └── test_chrono.py  # Chrono 모듈을 위한 단위/통합 테스트
 ```
 
 ## 설치 방법
@@ -49,7 +46,7 @@ Chrono는 잦은 시간 조회가 필요하지만 반복적인 시스템 콜로 
 Chrono는 바로 사용할 수 있도록 설계되었습니다. 미리 초기화된 `chrono` 인스턴스를 임포트하기만 하면 됩니다.
 
 ```python
-from src.utils.chrono import chrono, now, timestamp
+from src.chrono import chrono, now, timestamp
 
 # 'chrono' 인스턴스는 시스템 타임존으로 자동 설정됩니다.
 
@@ -72,7 +69,7 @@ print(f"전역 now() 함수: {now()}")
 운영 환경에서는 동작의 일관성을 보장하기 위해 타임존을 명시적으로 설정하는 것이 가장 좋습니다.
 
 ```python
-from src.utils.chrono import reconfigure_chrono, now
+from src.chrono import reconfigure_chrono, now
 
 # 애플리케이션 시작 시점에 재설정
 reconfigure_chrono(
@@ -89,7 +86,7 @@ print(f"서버 시각 (UTC): {now()}")
 언제든지 성능 및 설정 관련 통계 정보를 조회할 수 있습니다.
 
 ```python
-from src.utils.chrono import get_chrono_stats
+from src.chrono import get_chrono_stats
 import json
 
 stats = get_chrono_stats()
@@ -110,9 +107,9 @@ print(json.dumps(stats, indent=2, ensure_ascii=False))
 
 ## 테스트 실행
 
-모듈의 안정성과 성능을 보장하기 위해 종합적인 테스트 스위트가 포함되어 있습니다. `pytest`와 같은 테스트 러너를 사용하여 테스트를 실행할 수 있습니다.
+모듈의 안정성과 성능을 보장하기 위해 종합적인 테스트 스위트가 포함되어 있습니다.
 
 ```bash
 # 프로젝트 최상위 디렉토리에서 실행
-pytest
+python tests/test_chrono.py
 ```
